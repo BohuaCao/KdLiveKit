@@ -38,7 +38,7 @@
         
         
 #ifdef DEBUG
-        enabledWriteVideoFile = NO;
+        enabledWriteVideoFile = YES;
         [self initForFilePath];
 #endif
     }
@@ -142,11 +142,13 @@
         return TRUE;
     }
     
+    Float64 inSampleRate = _configuration.inAudioSampleRate ? _configuration.inAudioSampleRate :  _configuration.audioSampleRate;
+    NSUInteger inChannels = _configuration.inNumberOfChannels ? _configuration.inNumberOfChannels : _configuration.numberOfChannels;
     AudioStreamBasicDescription inputFormat = {0};
-    inputFormat.mSampleRate = _configuration.audioSampleRate;
+    inputFormat.mSampleRate = inSampleRate;
     inputFormat.mFormatID = kAudioFormatLinearPCM;
     inputFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
-    inputFormat.mChannelsPerFrame = (UInt32)_configuration.numberOfChannels;
+    inputFormat.mChannelsPerFrame = (UInt32)inChannels;
     inputFormat.mFramesPerPacket = 1;
     inputFormat.mBitsPerChannel = 16;
     inputFormat.mBytesPerFrame = inputFormat.mBitsPerChannel / 8 * inputFormat.mChannelsPerFrame;
@@ -154,7 +156,7 @@
     
     AudioStreamBasicDescription outputFormat; // 这里开始是输出音频格式
     memset(&outputFormat, 0, sizeof(outputFormat));
-    outputFormat.mSampleRate = inputFormat.mSampleRate;       // 采样率保持一致
+    outputFormat.mSampleRate = _configuration.audioSampleRate;
     outputFormat.mFormatID = kAudioFormatMPEG4AAC;            // AAC编码 kAudioFormatMPEG4AAC kAudioFormatMPEG4AAC_HE_V2
     outputFormat.mChannelsPerFrame = (UInt32)_configuration.numberOfChannels;;
     outputFormat.mFramesPerPacket = 1024;                     // AAC一帧是1024个字节
