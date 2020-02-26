@@ -38,7 +38,7 @@
         
         
 #ifdef DEBUG
-        enabledWriteVideoFile = YES;
+        enabledWriteVideoFile = NO;
         [self initForFilePath];
 #endif
     }
@@ -142,13 +142,11 @@
         return TRUE;
     }
     
-    Float64 inSampleRate = _configuration.inAudioSampleRate ? _configuration.inAudioSampleRate :  _configuration.audioSampleRate;
-    NSUInteger inChannels = _configuration.inNumberOfChannels ? _configuration.inNumberOfChannels : _configuration.numberOfChannels;
     AudioStreamBasicDescription inputFormat = {0};
-    inputFormat.mSampleRate = inSampleRate;
+    inputFormat.mSampleRate = _configuration.audioSampleRate;
     inputFormat.mFormatID = kAudioFormatLinearPCM;
     inputFormat.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked;
-    inputFormat.mChannelsPerFrame = (UInt32)inChannels;
+    inputFormat.mChannelsPerFrame = (UInt32)_configuration.numberOfChannels;
     inputFormat.mFramesPerPacket = 1;
     inputFormat.mBitsPerChannel = 16;
     inputFormat.mBytesPerFrame = inputFormat.mBitsPerChannel / 8 * inputFormat.mChannelsPerFrame;
@@ -288,6 +286,51 @@ OSStatus inputDataProc(AudioConverterRef inConverter, UInt32 *ioNumberDataPacket
     NSString *documentsDirectory = [paths objectAtIndex:0];
     NSString *writablePath = [documentsDirectory stringByAppendingPathComponent:filename];
     return writablePath;
+}
+
+#pragma mark - Resample audio
+uint64_t Resample_s16(const int16_t *input, int16_t *output, int inSampleRate, int outSampleRate, uint64_t inputSize,
+                      uint32_t channels
+) {
+    if (input == NULL)
+        return 0;
+    uint64_t outputSize = inputSize * outSampleRate / inSampleRate;
+    if (output == NULL)
+        return outputSize;
+    double stepDist = ((double) inSampleRate / (double) outSampleRate);
+    const uint64_t fixedFraction = (1LL << 32);
+    const double normFixed = (1.0 / (1LL << 32));
+    uint64_t step = ((uint64_t) (stepDist * fixedFraction + 0.5));
+    uint64_t curOffset = 0;
+    for (uint32_t i = 0; i < outputSize; i += 1) {
+        for (uint32_t c = 0; c < channels; c += 1) {
+            *output++ = (int16_t) (input[c] + (input[c + channels] - input[c]) * (
+                    (double) (curOffset >> 32) + ((curOffset & (fixedFraction - 1)) * normFixed)
+            )
+            );
+        }
+        curOffset += step;
+        input += (curOffset >> 32) * channels;
+        curOffset &= (fixedFraction - 1);
+    }
+    return outputSize;
+}
+
+short* resample(short* input, int inSampleRate, int outSampleRate, uint64_t inputSize,
+                uint32_t channels) {
+    uint64_t targetSampleCount = Resample_s16(input, 0, inSampleRate, outSampleRate, inputSize, channels);
+    if (input) {
+        short *output = (short *) malloc(targetSampleCount * sizeof(short));
+        if (output) {
+            double startTime = now();
+            Resample_s16(input, output, inSampleRate, outSampleRate, inputSize / channels, channels);
+            double time_interval = calcElapsed(startTime, now());
+            printf("time cost: %f ms\n ", (time_interval * 1000));
+            free(input);
+            return output;
+        }
+    }
+    return input;
 }
 
 @end
