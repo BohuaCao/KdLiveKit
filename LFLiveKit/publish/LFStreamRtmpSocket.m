@@ -55,6 +55,8 @@ SAVC(mp4a);
 @property (nonatomic, strong) LFStreamingBuffer *buffer;
 @property (nonatomic, strong) LFLiveDebug *debugInfo;
 @property (nonatomic, strong) dispatch_queue_t rtmpSendQueue;
+@property (nonatomic, strong) dispatch_queue_t rtmpReconnectQueue;
+
 //错误信息
 @property (nonatomic, assign) RTMPError error;
 @property (nonatomic, assign) NSInteger retryTimes4netWorkBreaken;
@@ -483,21 +485,22 @@ Failed:
 
 // 断线重连
 - (void)reconnect {
+    __weak typeof(self) weakSelf = self;
     dispatch_async(self.rtmpSendQueue, ^{
-        if (self.retryTimes4netWorkBreaken++ < self.reconnectCount && !self.isReconnecting) {
-            self.isConnected = NO;
-            self.isConnecting = NO;
-            self.isReconnecting = YES;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                 [self performSelector:@selector(_reconnect) withObject:nil afterDelay:self.reconnectInterval];
+        if (weakSelf.retryTimes4netWorkBreaken++ < weakSelf.reconnectCount && !weakSelf.isReconnecting) {
+            weakSelf.isConnected = NO;
+            weakSelf.isConnecting = NO;
+            weakSelf.isReconnecting = YES;
+            dispatch_async(weakSelf.rtmpReconnectQueue, ^{
+                 [weakSelf performSelector:@selector(_reconnect) withObject:nil afterDelay:weakSelf.reconnectInterval];
             });
            
-        } else if (self.retryTimes4netWorkBreaken >= self.reconnectCount) {
-            if (self.delegate && [self.delegate respondsToSelector:@selector(socketStatus:status:)]) {
-                [self.delegate socketStatus:self status:LFLiveError];
+        } else if (weakSelf.retryTimes4netWorkBreaken >= weakSelf.reconnectCount) {
+            if (weakSelf.delegate && [weakSelf.delegate respondsToSelector:@selector(socketStatus:status:)]) {
+                [weakSelf.delegate socketStatus:weakSelf status:LFLiveError];
             }
-            if (self.delegate && [self.delegate respondsToSelector:@selector(socketDidError:errorCode:)]) {
-                [self.delegate socketDidError:self errorCode:LFLiveSocketError_ReConnectTimeOut];
+            if (weakSelf.delegate && [weakSelf.delegate respondsToSelector:@selector(socketDidError:errorCode:)]) {
+                [weakSelf.delegate socketDidError:weakSelf errorCode:LFLiveSocketError_ReConnectTimeOut];
             }
         }
     });
@@ -580,6 +583,13 @@ void ConnectionTimeCallback(PILI_CONNECTION_TIME *conn_time, void *userData) {
         _rtmpSendQueue = dispatch_queue_create("com.youku.LaiFeng.RtmpSendQueue", NULL);
     }
     return _rtmpSendQueue;
+}
+
+- (dispatch_queue_t)rtmpReconnectQueue{
+    if(!_rtmpReconnectQueue){
+        _rtmpReconnectQueue = dispatch_queue_create("com.youku.LaiFeng.RtmpReconnectQueue", NULL);
+    }
+    return _rtmpReconnectQueue;
 }
 
 @end
