@@ -17,6 +17,7 @@
 #import "LFGPUImageBeautyFilter.h"
 #import "LFH264VideoEncoder.h"
 
+#define MAX_FPS_SAMPLE_TIMES 60
 
 @interface LFLiveSession ()<LFAudioCaptureDelegate, LFVideoCaptureDelegate, LFAudioEncodingDelegate, LFVideoEncodingDelegate, LFStreamSocketDelegate>
 
@@ -71,6 +72,11 @@
 @end
 
 @implementation LFLiveSession
+{
+    unsigned long long _frames;
+    NSDate *_beginDate;
+    NSUInteger _fpsSampleTimes;
+}
 
 #pragma mark -- LifeCycle
 - (instancetype)initWithAudioConfiguration:(nullable LFLiveAudioConfiguration *)audioConfiguration videoConfiguration:(nullable LFLiveVideoConfiguration *)videoConfiguration {
@@ -94,6 +100,21 @@
     _audioCaptureSource.running = NO;
 }
 
+- (float)outFPS {
+    unsigned long long frames = _frames;
+    NSDate *now = [NSDate date];
+    float fps =  frames / [now timeIntervalSinceDate:_beginDate];
+    
+    //check sample times
+    if (++_fpsSampleTimes > MAX_FPS_SAMPLE_TIMES) {
+        _fpsSampleTimes = 0;
+        _frames = 0;
+        _beginDate = now;
+    }
+    
+    return fps;
+}
+
 #pragma mark -- CustomMethod
 - (void)startLive:(LFLiveStreamInfo *)streamInfo {
     if (!streamInfo) return;
@@ -107,6 +128,9 @@
     self.uploading = NO;
     [self.socket stop];
     self.socket = nil;
+    _fpsSampleTimes = 0;
+    _frames = 0;
+    _beginDate = nil;
 }
 
 - (void)pushVideo:(nullable CVPixelBufferRef)pixelBuffer{
@@ -152,7 +176,15 @@
     //<上传 时间戳对齐
     if (self.uploading){
         if(frame.isKeyFrame && self.hasCaptureAudio) self.hasKeyFrameVideo = YES;
-        if(self.AVAlignment) [self pushSendBuffer:frame];
+        if(self.AVAlignment) {
+            [self pushSendBuffer:frame];
+            
+            //collect vieo frames
+            ++_frames;
+            if (!_beginDate) {
+                _beginDate = [NSDate date];
+            }
+        }
     }
 }
 
@@ -199,17 +231,20 @@
 - (void)socketBufferStatus:(nullable id<LFStreamSocket>)socket status:(LFLiveBuffferState)status {
     if((self.captureType & LFLiveCaptureMaskVideo || self.captureType & LFLiveInputMaskVideo) && self.adaptiveBitrate){
         NSUInteger videoBitRate = [self.videoEncoder videoBitRate];
+        self.currentBitrate = videoBitRate;
         if (status == LFLiveBuffferDecline) {
             if (videoBitRate < _videoConfiguration.videoMaxBitRate) {
                 videoBitRate = videoBitRate + 50 * 1000;
                 [self.videoEncoder setVideoBitRate:videoBitRate];
                 NSLog(@"Increase bitrate %@", @(videoBitRate));
+                self.currentBitrate = videoBitRate;
             }
         } else {
             if (videoBitRate > self.videoConfiguration.videoMinBitRate) {
                 videoBitRate = videoBitRate - 100 * 1000;
                 [self.videoEncoder setVideoBitRate:videoBitRate];
                 NSLog(@"Decline bitrate %@", @(videoBitRate));
+                self.currentBitrate = videoBitRate;
             }
         }
     }

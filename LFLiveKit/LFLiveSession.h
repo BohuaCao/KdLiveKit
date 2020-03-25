@@ -127,6 +127,10 @@ typedef NS_ENUM(NSInteger,LFLiveCaptureTypeMask) {
 /* The saveLocalVideoPath is save the local video  path */
 @property (nonatomic, strong, nullable) NSURL *saveLocalVideoPath;
 
+@property (nonatomic, readonly) float outFPS;
+
+@property (nonatomic) NSUInteger currentBitrate;
+
 #pragma mark - Initializer
 ///=============================================================================
 /// @name Initializer

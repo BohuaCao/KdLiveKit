@@ -154,7 +154,7 @@
     
     AudioStreamBasicDescription outputFormat; // 这里开始是输出音频格式
     memset(&outputFormat, 0, sizeof(outputFormat));
-    outputFormat.mSampleRate = _configuration.audioSampleRate;
+    outputFormat.mSampleRate = inputFormat.mSampleRate;       // 采样率保持一致
     outputFormat.mFormatID = kAudioFormatMPEG4AAC;            // AAC编码 kAudioFormatMPEG4AAC kAudioFormatMPEG4AAC_HE_V2
     outputFormat.mChannelsPerFrame = (UInt32)_configuration.numberOfChannels;;
     outputFormat.mFramesPerPacket = 1024;                     // AAC一帧是1024个字节
@@ -287,50 +287,4 @@ OSStatus inputDataProc(AudioConverterRef inConverter, UInt32 *ioNumberDataPacket
     NSString *writablePath = [documentsDirectory stringByAppendingPathComponent:filename];
     return writablePath;
 }
-
-#pragma mark - Resample audio
-uint64_t Resample_s16(const int16_t *input, int16_t *output, int inSampleRate, int outSampleRate, uint64_t inputSize,
-                      uint32_t channels
-) {
-    if (input == NULL)
-        return 0;
-    uint64_t outputSize = inputSize * outSampleRate / inSampleRate;
-    if (output == NULL)
-        return outputSize;
-    double stepDist = ((double) inSampleRate / (double) outSampleRate);
-    const uint64_t fixedFraction = (1LL << 32);
-    const double normFixed = (1.0 / (1LL << 32));
-    uint64_t step = ((uint64_t) (stepDist * fixedFraction + 0.5));
-    uint64_t curOffset = 0;
-    for (uint32_t i = 0; i < outputSize; i += 1) {
-        for (uint32_t c = 0; c < channels; c += 1) {
-            *output++ = (int16_t) (input[c] + (input[c + channels] - input[c]) * (
-                    (double) (curOffset >> 32) + ((curOffset & (fixedFraction - 1)) * normFixed)
-            )
-            );
-        }
-        curOffset += step;
-        input += (curOffset >> 32) * channels;
-        curOffset &= (fixedFraction - 1);
-    }
-    return outputSize;
-}
-
-short* resample(short* input, int inSampleRate, int outSampleRate, uint64_t inputSize,
-                uint32_t channels) {
-    uint64_t targetSampleCount = Resample_s16(input, 0, inSampleRate, outSampleRate, inputSize, channels);
-    if (input) {
-        short *output = (short *) malloc(targetSampleCount * sizeof(short));
-        if (output) {
-            double startTime = now();
-            Resample_s16(input, output, inSampleRate, outSampleRate, inputSize / channels, channels);
-            double time_interval = calcElapsed(startTime, now());
-            printf("time cost: %f ms\n ", (time_interval * 1000));
-            free(input);
-            return output;
-        }
-    }
-    return input;
-}
-
 @end

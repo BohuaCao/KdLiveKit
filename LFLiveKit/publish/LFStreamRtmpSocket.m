@@ -123,7 +123,17 @@ SAVC(mp4a);
         PILI_RTMP_Close(_rtmp, &_error);
         PILI_RTMP_Free(_rtmp);
     }
-    [self RTMP264_Connect:(char *)[_stream.url cStringUsingEncoding:NSASCIIStringEncoding]];
+    
+    //check url
+    char *url = (char *)[_stream.url cStringUsingEncoding:NSASCIIStringEncoding];
+    if (url == NULL) {
+        _isConnecting = NO;
+        if (self.delegate && [self.delegate respondsToSelector:@selector(socketStatus:status:)]) {
+            [self.delegate socketStatus:self status:LFLiveError];
+        }
+    } else {
+        [self RTMP264_Connect:url];
+    }
 }
 
 - (void)stop {
