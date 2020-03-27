@@ -49,13 +49,13 @@ SAVC(mp4a);
 @interface LFStreamRTMPSocket ()<LFStreamingBufferDelegate>
 {
     PILI_RTMP *_rtmp;
+    BOOL _isStop;
 }
 @property (nonatomic, weak) id<LFStreamSocketDelegate> delegate;
 @property (nonatomic, strong) LFLiveStreamInfo *stream;
 @property (nonatomic, strong) LFStreamingBuffer *buffer;
 @property (nonatomic, strong) LFLiveDebug *debugInfo;
 @property (nonatomic, strong) dispatch_queue_t rtmpSendQueue;
-@property (nonatomic, strong) dispatch_queue_t rtmpReconnectQueue;
 
 //错误信息
 @property (nonatomic, assign) RTMPError error;
@@ -100,8 +100,10 @@ SAVC(mp4a);
 }
 
 - (void)start {
+    __weak typeof(self) weakSelf = self;
+    _isStop = false;
     dispatch_async(self.rtmpSendQueue, ^{
-        [self _start];
+        [weakSelf _start];
     });
 }
 
@@ -123,23 +125,15 @@ SAVC(mp4a);
         PILI_RTMP_Close(_rtmp, &_error);
         PILI_RTMP_Free(_rtmp);
     }
-    
-    //check url
-    char *url = (char *)[_stream.url cStringUsingEncoding:NSASCIIStringEncoding];
-    if (url == NULL) {
-        _isConnecting = NO;
-        if (self.delegate && [self.delegate respondsToSelector:@selector(socketStatus:status:)]) {
-            [self.delegate socketStatus:self status:LFLiveError];
-        }
-    } else {
-        [self RTMP264_Connect:url];
-    }
+    [self RTMP264_Connect:(char *)[_stream.url cStringUsingEncoding:NSASCIIStringEncoding]];
 }
 
 - (void)stop {
+    __weak typeof(self) weakSelf = self;
+    _isStop = true;
     dispatch_async(self.rtmpSendQueue, ^{
-        [self _stop];
-        [NSObject cancelPreviousPerformRequestsWithTarget:self];
+        [weakSelf _stop];
+        [NSObject cancelPreviousPerformRequestsWithTarget:weakSelf];
     });
 }
 
@@ -173,9 +167,10 @@ SAVC(mp4a);
     __weak typeof(self) _self = self;
      dispatch_async(self.rtmpSendQueue, ^{
         if (!_self.isSending && _self.buffer.list.count > 0) {
+            typeof(self) strongSelf = _self;
             _self.isSending = YES;
 
-            if (!_self.isConnected || _self.isReconnecting || _self.isConnecting || !_rtmp){
+            if (!_self.isConnected || _self.isReconnecting || _self.isConnecting || !strongSelf->_rtmp){
                 _self.isSending = NO;
                 return;
             }
@@ -237,7 +232,7 @@ SAVC(mp4a);
             
             //修改发送状态
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                //< 这里只为了不循环调用sendFrame方法 调用栈是保证先出栈再进栈
+                //这里只为了不循环调用sendFrame方法 调用栈是保证先出栈再进栈
                 _self.isSending = NO;
             });
             
@@ -258,6 +253,15 @@ SAVC(mp4a);
 }
 
 - (NSInteger)RTMP264_Connect:(char *)push_url {
+    //check url
+    if (push_url == NULL) {
+        _isConnecting = NO;
+        if (self.delegate && [self.delegate respondsToSelector:@selector(socketStatus:status:)]) {
+            [self.delegate socketStatus:self status:LFLiveError];
+        }
+        return -1;
+    }
+    
     //由于摄像头的timestamp是一直在累加，需要每次得到相对时间戳
     //分配与初始化
     _rtmp = PILI_RTMP_Alloc();
@@ -501,10 +505,11 @@ Failed:
             weakSelf.isConnected = NO;
             weakSelf.isConnecting = NO;
             weakSelf.isReconnecting = YES;
-            dispatch_async(weakSelf.rtmpReconnectQueue, ^{
-                 [weakSelf performSelector:@selector(_reconnect) withObject:nil afterDelay:weakSelf.reconnectInterval];
+            
+            //do reconnect after interval seconds
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(weakSelf.reconnectInterval * NSEC_PER_SEC)), weakSelf.rtmpSendQueue, ^{
+                [weakSelf _reconnect];
             });
-           
         } else if (weakSelf.retryTimes4netWorkBreaken >= weakSelf.reconnectCount) {
             if (weakSelf.delegate && [weakSelf.delegate respondsToSelector:@selector(socketStatus:status:)]) {
                 [weakSelf.delegate socketStatus:weakSelf status:LFLiveError];
@@ -517,7 +522,12 @@ Failed:
 }
 
 - (void)_reconnect{
-    [NSObject cancelPreviousPerformRequestsWithTarget:self];
+    NSLog(@"%@:%@:%@", NSStringFromClass(self.class), NSStringFromSelector(_cmd), [NSThread currentThread]);
+    
+    //check if it is stop
+    if (_isStop) {
+        return;
+    }
     
     _isReconnecting = NO;
     if(_isConnected) return;
@@ -590,16 +600,9 @@ void ConnectionTimeCallback(PILI_CONNECTION_TIME *conn_time, void *userData) {
 
 - (dispatch_queue_t)rtmpSendQueue{
     if(!_rtmpSendQueue){
-        _rtmpSendQueue = dispatch_queue_create("com.youku.LaiFeng.RtmpSendQueue", NULL);
+        _rtmpSendQueue = dispatch_queue_create("com.candaovr.liveSDK.RtmpSendQueue", NULL);
     }
     return _rtmpSendQueue;
-}
-
-- (dispatch_queue_t)rtmpReconnectQueue{
-    if(!_rtmpReconnectQueue){
-        _rtmpReconnectQueue = dispatch_queue_create("com.youku.LaiFeng.RtmpReconnectQueue", NULL);
-    }
-    return _rtmpReconnectQueue;
 }
 
 @end
